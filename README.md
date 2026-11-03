@@ -2,3 +2,4 @@
 
 ## Team Members
 - Daniel Chen (yc2886)
+- Olivia Yu (qy265)
