@@ -221,7 +221,131 @@ let test_ai_observation_game_not_in_progress () =
        2
     = Error Kittens.Ai.Game_not_in_progress)
 
-(** Runs all card, game-state, and AI interface assertions. *)
+(* ---------- Game initialization (Setup) ---------- *)
+
+module S = Kittens.Setup
+module C = Kittens.Card
+
+(** [setup_exn ?seed configs] runs [Setup.init] with a fixed seed and fails
+    the test if initialization returns an error. *)
+let setup_exn ?(seed = 42) configs =
+  match S.init ~rng:(Random.State.make [| seed |]) configs with
+  | Ok s -> s
+  | Error _ -> assert false
+
+(** [all_cards state] is every card in the game: draw pile plus all hands. *)
+let all_cards state =
+  state.Kittens.Game_state.draw_pile
+  @ List.concat_map
+      (fun p -> p.Kittens.Player.hand)
+      state.Kittens.Game_state.players
+
+(** The base deck contains no Exploding Kittens and no Defuse cards. *)
+let test_base_deck_has_no_kittens_or_defuses () =
+  for n = S.min_players to S.max_players do
+    let deck = S.base_deck n in
+    assert (S.count C.Exploding_Kitten deck = 0);
+    assert (S.count C.Defuse deck = 0)
+  done
+
+(** The base deck scales with the player count: 6n + 4 cards. *)
+let test_base_deck_scales_with_players () =
+  for n = S.min_players to S.max_players do
+    let deck = S.base_deck n in
+    assert (List.length deck = (6 * n) + 4);
+    assert (S.count C.Skip deck = (2 * n) + 1);
+    assert (S.count C.Reverse deck = n + 1);
+    assert (S.count C.Shuffle deck = n + 1);
+    assert (S.count C.See_the_Future deck = (2 * n) + 1)
+  done
+
+(** Shuffling preserves the multiset of cards. *)
+let test_shuffle_is_permutation () =
+  let deck = S.base_deck 4 in
+  let shuffled = S.shuffle (Random.State.make [| 7 |]) deck in
+  assert (List.sort compare deck = List.sort compare shuffled)
+
+(** For every supported player count: n - 1 Exploding Kittens (all in the
+    draw pile), n + 2 Defuses with exactly 2 in the draw pile, every base
+    card, and each player starts with 5 cards including exactly one Defuse. *)
+let test_deck_composition_all_sizes () =
+  for n = S.min_players to S.max_players do
+    let { S.state; _ } = setup_exn (S.make_configs ~humans:n ~ais:[]) in
+    let cards = all_cards state in
+    assert (S.count C.Exploding_Kitten cards = n - 1);
+    assert (S.count C.Exploding_Kitten state.draw_pile = n - 1);
+    assert (S.count C.Defuse cards = n + 2);
+    assert (S.count C.Defuse state.draw_pile = S.extra_defuses);
+    assert (
+      List.length cards = List.length (S.base_deck n) + (n + 2) + (n - 1));
+    assert (List.length state.draw_pile = (3 * n) + 5);
+    List.iter
+      (fun p ->
+        assert (S.count C.Defuse p.Kittens.Player.hand = 1);
+        assert (S.count C.Exploding_Kitten p.Kittens.Player.hand = 0);
+        assert (List.length p.Kittens.Player.hand = S.starting_hand_size))
+      state.players
+  done
+
+(** The initial state has unique IDs 1..n, starts with player 1, goes
+    clockwise, has an empty discard pile, and passes validation. *)
+let test_initial_state_fields () =
+  let { S.state; _ } =
+    setup_exn (S.make_configs ~humans:1 ~ais:[ S.Cautious; S.Aggressive ])
+  in
+  assert (
+    List.map (fun p -> p.Kittens.Player.player_id) state.players = [ 1; 2; 3 ]);
+  assert (state.current_player_id = 1);
+  assert (state.direction = Kittens.Game_state.Clockwise);
+  assert (state.discard_pile = []);
+  assert (state.remaining_players = 3);
+  assert (state.status = Kittens.Game_state.In_progress);
+  assert (Kittens.Game_state.validate state = Ok ())
+
+(** Mixed human/AI seats get the right kinds, and every AI receives a profile
+    with its configured strategy and no prior knowledge. *)
+let test_mixed_players_and_strategies () =
+  let configs =
+    S.make_configs ~humans:2 ~ais:[ S.Random_play; S.Cautious; S.Aggressive ]
+  in
+  let setup = setup_exn configs in
+  assert (
+    List.map (fun p -> p.Kittens.Player.kind) setup.state.players
+    = Kittens.Player.[ Human; Human; AI; AI; AI ]);
+  assert (List.map (fun p -> p.S.ai_id) setup.ai_profiles = [ 3; 4; 5 ]);
+  assert (S.strategy_of setup 3 = Some S.Random_play);
+  assert (S.strategy_of setup 4 = Some S.Cautious);
+  assert (S.strategy_of setup 5 = Some S.Aggressive);
+  assert (S.strategy_of setup 1 = None);
+  List.iter (fun p -> assert (p.S.known_top_cards = [])) setup.ai_profiles
+
+(** An all-AI game is allowed, and each AI can observe the initial state. *)
+let test_all_ai_game_observable () =
+  let setup = setup_exn (S.make_configs ~humans:0 ~ais:[ S.Cautious; S.Cautious ]) in
+  assert (List.length setup.ai_profiles = 2);
+  List.iter
+    (fun p ->
+      match Kittens.Ai.observe setup.state p.Kittens.Player.player_id with
+      | Ok obs -> assert (obs.hand = p.Kittens.Player.hand)
+      | Error _ -> assert false)
+    setup.state.players
+
+(** The same seed produces the same deal. *)
+let test_seed_is_reproducible () =
+  let configs = S.make_configs ~humans:1 ~ais:[ S.Aggressive ] in
+  assert ((setup_exn ~seed:3 configs).state = (setup_exn ~seed:3 configs).state)
+
+(** Invalid player counts are rejected. *)
+let test_setup_errors () =
+  assert (S.init [ S.Human_player ] = Error (S.Too_few_players 1));
+  assert (S.init [] = Error (S.Too_few_players 0));
+  assert (
+    S.init (S.make_configs ~humans:9 ~ais:[]) = Error (S.Too_many_players 9));
+  assert (
+    Result.is_ok
+      (S.init (S.make_configs ~humans:2 ~ais:(List.init 6 (fun _ -> S.Cautious)))))
+
+(** Runs all card, game-state, AI interface, and setup assertions. *)
 let run_tests () =
   test_card_categories ();
   test_valid_in_progress_state ();
@@ -236,6 +360,15 @@ let run_tests () =
   test_human_cannot_request_ai_observation ();
   test_ai_observation_player_not_found ();
   test_eliminated_ai_cannot_observe ();
-  test_ai_observation_game_not_in_progress ()
+  test_ai_observation_game_not_in_progress ();
+  test_base_deck_has_no_kittens_or_defuses ();
+  test_base_deck_scales_with_players ();
+  test_shuffle_is_permutation ();
+  test_deck_composition_all_sizes ();
+  test_initial_state_fields ();
+  test_mixed_players_and_strategies ();
+  test_all_ai_game_observable ();
+  test_seed_is_reproducible ();
+  test_setup_errors ()
 
 let () = run_tests ()
