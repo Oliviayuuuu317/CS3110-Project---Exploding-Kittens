@@ -83,7 +83,7 @@ let test_defuse () =
       [ Card.Exploding_Kitten ]
   in
   let after, outcome = checked before (Deck.draw_card (rng ()) before ~player_id:2) in
-  assert (outcome = Deck.Defused_kitten);
+  assert (outcome = Deck.Defused_kitten 0);
   assert (after.draw_pile = [ Card.Exploding_Kitten ]);
   assert (after.discard_pile = [ Card.Defuse ]);
   assert (after.players = [ player 1 []; ai [ Card.Defuse; Card.Skip ] ]);
