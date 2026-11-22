@@ -91,3 +91,27 @@ let validate state =
         else Finished_winner_not_active winner_id :: errors
   in
   match errors with [] -> Ok () | _ -> Error (List.rev errors)
+
+let end_turn state =
+  let ordered_players =
+    match state.direction with
+    | Clockwise -> state.players
+    | Counterclockwise -> List.rev state.players
+  in
+  let rec after_current before = function
+    | [] -> invalid_arg "Game_state.end_turn: current player not found"
+    | player :: rest ->
+        if player.Player.player_id = state.current_player_id then
+          rest @ List.rev (player :: before)
+        else after_current (player :: before) rest
+  in
+  let next_player =
+    List.find
+      (fun player -> player.Player.status = Player.Active)
+      (after_current [] ordered_players)
+  in
+  let next_id = next_player.Player.player_id in
+  let status =
+    if state.remaining_players = 1 then Finished next_id else state.status
+  in
+  { state with current_player_id = next_id; status }

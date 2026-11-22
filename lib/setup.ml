@@ -49,16 +49,7 @@ let replicate n x = List.init n (fun _ -> x)
 let base_deck n =
   List.concat_map (fun (card, k) -> replicate k card) (base_counts n)
 
-let shuffle rng cards =
-  let arr = Array.of_list cards in
-  (* Fisher-Yates: swap each position with a random earlier-or-equal one. *)
-  for i = Array.length arr - 1 downto 1 do
-    let j = Random.State.int rng (i + 1) in
-    let tmp = arr.(i) in
-    arr.(i) <- arr.(j);
-    arr.(j) <- tmp
-  done;
-  Array.to_list arr
+let shuffle = Deck.shuffle
 
 let count card cards =
   List.fold_left (fun acc c -> if c = card then acc + 1 else acc) 0 cards

@@ -44,3 +44,10 @@ type invariant_violation =
     This does not check deck composition, card conservation, or card effects;
     callers should run it after producing a complete state update. *)
 val validate : game_state -> (unit, invariant_violation list) result
+
+val end_turn : game_state -> game_state
+(** [end_turn state] advances in the current direction, skipping eliminated
+    players. If one active player remains, that player wins. Call during an
+    in-progress game with the current player still in the seating list and
+    at least one active player. The current player may have just been
+    eliminated. *)

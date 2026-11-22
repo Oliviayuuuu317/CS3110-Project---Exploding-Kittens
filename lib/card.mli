@@ -7,7 +7,7 @@ type card =
   | Shuffle  (** Shuffles the draw pile. *)
   | See_the_Future  (** Reveals upcoming cards to the current player. *)
 
-(** A basic player choice. Card-specific effects are handled by their owners. *)
+(** A choice submitted to [Deck.apply_action] by either controller type. *)
 type action =
   | Draw_card  (** Draw the top card of the draw pile. *)
   | Play_card of card  (** Play the given card from the player's hand. *)
